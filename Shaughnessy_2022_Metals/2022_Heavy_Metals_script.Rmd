@@ -1,0 +1,1603 @@
+---
+title: "2022_Heavy_Metals"
+author: "Brianna Shaughnessy"
+date: "3/24/2022"
+output: html_document
+---
+
+```{r setup, directory and libraries, echo=FALSE}
+getwd()
+setwd("/Users/briannashaughnessy/Desktop/Shaughnessy_2022_Metals")
+Metals <- read.csv("Metals_Meta_Data.csv", check.names = F)
+
+library(ggplot2)
+library(ggridges)        
+library(viridis)
+library(viridisLite)
+library(shiny)
+library(dplyr)
+library(forcats)
+library(car)
+library(DHARMa)
+library(betareg)
+library(GGally)
+library(sf)
+library(raster)
+library(tidyverse)
+library(mapview)
+library(tmap)
+library(RColorBrewer)
+library(maptools)
+library(rgeos)
+library(flextable)
+library(emmeans)
+library(ggstar)
+
+head(Metals)
+
+```
+
+####GLM with Gamma distribution####
+
+```{r, GLM data wrangling}
+
+#scatterplot to inspect data
+ggplot(Metals, aes(x = site, y = log(Cd + 1))) +
+  geom_point() +
+  facet_wrap(~blade_location)
+
+ggplot(Metals, aes(x = site, y = log(Hg + 1))) +
+  geom_point() +
+  facet_wrap(~blade_location)
+
+#Decided to use GLM with a Gamma distribution (Multiplicative arithmetic mean model based on inspection of data.
+
+#Pull only the columns that we need for the GLMs
+GLM_Data <- Metals %>%
+  dplyr::select(c(site, blade_location, Cd, Pb, Hg, Total_As, Inorganic_As))
+
+#Southern Farm sites were collected as preliminary data in 2018. They (1) were not sampled for multiple blade locations but just the mid blade, and (2) we only had resources for one arsenic speciation analysis. These samples are removed from the GLM for not.
+
+#remove nas (mid blade samples from the 2018 Southern Farm sites, n = 12)
+GLM_Data <- mutate_all(GLM_Data, na_if, 'SFARM')
+GLM_Data <- na.omit(GLM_Data)
+
+```
+
+```{r, GLMs, assumptions, and post-hoc contrasts}
+
+#Cadmium GLM for site by blade location
+Cd_glm <- glm(Cd ~ site*blade_location, data = GLM_Data, family = Gamma(link = "log"))
+#Test assumptions for Cadmium GLM
+Cd_assumptions <- simulateResiduals(fittedModel = Cd_glm, n = 500)
+plot(Cd_assumptions)
+#KS test: p= 0.905
+#Dispersion test: p = 0.32
+#Outlier test: p = 1
+#Data meets assumptions of GLM.
+performance::check_model(Cd_glm)
+
+#Query the model
+Cd_Anova <- anova(Cd_glm, test = "F") #blade location is only significant factor.
+cadmium_em <- emmeans(Cd_glm, ~site|blade_location)
+cadmium_tukey <- emmeans::contrast(cadmium_em, method = "tukey")
+cadmium_em_blade <- emmeans(Cd_glm, ~blade_location|site)
+cadmium_tukey_blade <- emmeans::contrast(cadmium_em_blade, method = "tukey")
+plot(cadmium_tukey_blade)
+plot(cadmium_em_blade)
+plot(cadmium_em)
+
+#Lead GLM for site by blade location
+lead_glm <- glm(Pb ~ site * blade_location, data = GLM_Data, family = Gamma(link = "log"))
+Pb_assumptions <- simulateResiduals(fittedModel = lead_glm, n = 500)
+plot(Pb_assumptions)
+#KS test: p= 0.404
+#Dispersion test: p = 0.584
+#Outlier test: p = 1
+#Residuals vs. predicted look good. Data meets assumptions of GLM
+performance::check_model(lead_glm)
+
+#Query the model
+Pb_Anova <- anova(lead_glm, test = "F") #site and blade location are significant and there is a strong interactive effect between the two.
+Pb_em <- emmeans(lead_glm, ~site|blade_location)
+Pb_tukey <- emmeans::contrast(Pb_em, method = "tukey")
+Pb_em_blade <- emmeans(lead_glm, ~blade_location|site)
+Pb_tukey_blade <- emmeans::contrast(Pb_em_blade, method = "tukey")
+Pb_em_site <- emmeans(lead_glm, ~site)
+Pb_tukey_site <- emmeans::contrast(Pb_em_site, method = "tukey")
+plot(Pb_em)
+
+#Total Arsenic GLM
+AsT_glm = glm(Total_As ~ site * blade_location, data = GLM_Data, family = Gamma(link = "log"))
+AsT_assumptions <- simulateResiduals(fittedModel = AsT_glm, n = 500)
+plot(AsT_assumptions)
+#KS test: p= 0.773
+#Dispersion test: p = 0.508
+#Outlier test: p = 1
+#Residuals vs. predicted look good. Model meets GLM assumptions
+performance::check_model(AsT_glm)
+
+#Query the model
+AsT_Anova <- anova(AsT_glm, test = "F") #site and blade location are significant but they do not interact.
+AsT_em <- emmeans(AsT_glm, ~site|blade_location)
+AsT_tukey <- emmeans::contrast(AsT_em, method = "tukey")
+AsT_em_site <- emmeans(AsT_glm, ~site)
+AsT_tukey_site <- emmeans::contrast(AsT_em_site, method = "tukey")
+AsT_em_blade <- emmeans(AsT_glm, ~blade_location|site)
+AsT_tukey_blade <- emmeans::contrast(AsT_em_blade, method = "tukey")
+AsT_em_site <- emmeans(AsT_glm, ~site)
+AsT_tukey_site <- emmeans::contrast(AsT_em_site, method = "tukey")
+plot(AsT_em)
+
+
+#Inorganic arsenic regression
+GLM_Data$Inorganic_As = as.numeric(GLM_Data$Inorganic_As)
+iAs_glm = glm(Inorganic_As ~ site * blade_location, data = GLM_Data, family = Gamma(link = "log"))
+iAs_assumptions <- simulateResiduals(fittedModel = iAs_glm, n = 500)
+plot(iAs_assumptions)
+#KS test: p= 0.986
+#Dispersion test: p = 0.324
+#Outlier test: p = 1
+#Residuals vs. predicted look good. Data meet GLM assumptions
+performance::check_model(iAs_glm)
+
+#Query the model
+iAs_Anova <- anova(iAs_glm, test = "F")
+iAs_em <- emmeans(iAs_glm, ~site|blade_location)
+iAs_tukey <- emmeans::contrast(iAs_em, method = "tukey")
+iAs_em_blade <- emmeans(iAs_glm, ~blade_location|site)
+iAs_tukey_blade <- emmeans::contrast(iAs_em_blade, method = "tukey")
+iAs_em_site <- emmeans(iAs_glm, ~site)
+iAs_tukey_site <- emmeans::contrast(iAs_em_site, method = "tukey")
+plot(iAs_tukey_site)
+plot(iAs_em)
+
+#Mercury regression - had to remove 0 as an outlier
+Hg_glm = glm(Hg ~ site * blade_location, data = GLM_Data, family = Gamma(link = "log"))
+
+Hg_assumptions <- simulateResiduals(fittedModel = Hg_glm, n = 500)
+plot(Hg_assumptions)
+#KS test: p= 0.918
+#Dispersion test: p = 0.424
+#Outlier test: p = 0.07
+#Residuals vs. predicted: No sig. problems 
+performance::check_model(Hg_glm)
+
+#Query the model
+Hg_Anova <- anova(Hg_glm, test = "F")
+Hg_em <- emmeans(Hg_glm, ~site|blade_location)
+Hg_tukey <- emmeans::contrast(Hg_em, method = "tukey")
+Hg_em_blade <- emmeans(Hg_glm, ~blade_location|site)
+Hg_tukey_blade <- emmeans::contrast(Hg_em_blade, method = "tukey")
+Hg_em_site <- emmeans(Hg_glm, ~site)
+Hg_tukey_site <- emmeans::contrast(Hg_em_site, method = "tukey")
+plot(Hg_em) 
+
+```
+
+```{r, GLM contrasts tables}
+
+##Total arsenic
+#create a table of the contrasts 
+AsT_contrasts <- as.data.frame(AsT_tukey)
+flextable(AsT_contrasts)
+AsT_tukey_site <- as.data.frame(AsT_tukey_site)
+table <- flextable(AsT_tukey_site) %>%
+  colformat_num(big.mark = " ", decimal.mark = ".", digits = 2) %>% 
+  colformat_double(big.mark = " ", decimal.mark = ".", digits = 2)
+save_as_docx(table, path = "AsT_table_2.docx")
+
+##Inorganic arsenic
+
+iAs_contrasts <- as.data.frame(iAs_tukey)
+flextable(iAs_contrasts)
+iAs_tukey_site <- as.data.frame(iAs_tukey_site)
+iAs_site_table <- flextable(iAs_tukey_site) %>%
+  colformat_num(big.mark = " ", decimal.mark = ".", digits = 2) %>% 
+  colformat_double(big.mark = " ", decimal.mark = ".", digits = 2)
+save_as_docx(iAs_site_table, path = "iAs_site_table.docx")
+
+#Interactions
+iAs_tukey_interaction <- as.data.frame(iAs_tukey)
+iAs_interaction_table <- flextable(iAs_tukey_interaction) %>%
+  colformat_num(big.mark = " ", decimal.mark = ".", digits = 2) %>% 
+  colformat_double(big.mark = " ", decimal.mark = ".", digits = 2)
+save_as_docx(iAs_interaction_table, path = "iAs_interaction_table.docx")
+
+
+##Cadmium https://ardata-fr.github.io/flextable-book/index.html
+cadmium_contrasts <- as.data.frame(cadmium_tukey)
+flextable(cadmium_contrasts) %>%
+  colformat_num(digits = 2)
+save_as_docx(cd_table, path = "cd_table_2.docx")
+
+##Lead## 
+Pb_contrasts <- as.data.frame(Pb_tukey)
+Pb_contrasts <- flextable(Pb_contrasts) %>%
+  colformat_num(big.mark = " ", decimal.mark = ".", digits = 2) %>% 
+  colformat_double(big.mark = " ", decimal.mark = ".", digits = 2)
+save_as_docx(Pb_contrasts, path = "Pb_contrasts_table.docx")
+
+#Lead just the site level contrasts
+Pb_site_table <- as.data.frame(Pb_tukey_site)
+Pb_site_table <- flextable(Pb_site_table) %>%
+  colformat_num(big.mark = " ", decimal.mark = ".", digits = 2) %>% 
+  colformat_double(big.mark = " ", decimal.mark = ".", digits = 2)
+save_as_docx(Pb_site_table, path = "Pb_site_table.docx")
+
+
+##Mercury
+Hg_contrasts <- as.data.frame(Hg_tukey)
+flextable(Hg_contrasts)
+
+#Mercury just the site level contrasts
+Hg_tukey_site <- as.data.frame(Hg_tukey_site)
+Hg_site_table <- flextable(Hg_tukey_site) %>%
+  colformat_num(big.mark = " ", decimal.mark = ".", digits = 2) %>% 
+  colformat_double(big.mark = " ", decimal.mark = ".", digits = 2)
+save_as_docx(Hg_site_table, path = "Hg_site_table.docx")
+
+```
+
+####Data setup for figures####
+```{r, wrangling data for threshold figures, echo = FALSE}
+
+cd_metals <- Metals %>%
+  dplyr::select(c(site, lat, long, Cd, blade_location))
+cd_metals$metal_type <- "c. Cadmium (Cd)"
+cd_metals$threshold_dry <- (cd_metals$Cd/1)*100
+cd_metals$threshold_wet <- (cd_metals$Cd/3)*100
+colnames(cd_metals)[which(names(cd_metals) == "Cd")] <- "concentration"
+
+as_metals <- Metals %>%
+  dplyr::select(c(site, lat, long, Total_As, blade_location))
+as_metals$metal_type <- "a. Total arsenic (AsT)"
+as_metals$threshold_dry <- (as_metals$Total_As/40)*100
+as_metals$threshold_wet <- "NA"
+colnames(as_metals)[which(names(as_metals) == "Total_As")] <- "concentration"
+
+asi_metals <- Metals %>%
+  dplyr::select(c(site, lat, long, Inorganic_As, blade_location))
+#remove nas
+asi_metals <- mutate_all(asi_metals, na_if, 'na') 
+asi_metals <- na.omit(asi_metals)
+str(asi_metals)
+asi_metals$Inorganic_As <- as.numeric(asi_metals$Inorganic_As)
+asi_metals$metal_type <- "b. Inorganic arsenic (iAs)"
+asi_metals$threshold_dry <- (asi_metals$Inorganic_As/2)*100
+asi_metals$threshold_wet <- "NA"
+colnames(asi_metals)[which(names(asi_metals) == "Inorganic_As")] <- "concentration"
+
+Pb_metals <- Metals %>%
+  dplyr::select(c(site, lat, long, Pb, blade_location))
+Pb_metals$metal_type <- "d. Lead (Pb)"
+Pb_metals$threshold_dry <- (Pb_metals$Pb/10)*100
+Pb_metals$threshold_wet <- (Pb_metals$Pb/3)*100
+colnames(Pb_metals)[which(names(Pb_metals) == "Pb")] <- "concentration"
+
+Hg_metals <- Metals %>%
+  dplyr::select(c(site, lat, long, Hg, blade_location))
+Hg_metals$metal_type <- "e. Mercury (Hg)"
+Hg_metals$threshold_dry <- (Hg_metals$Hg/0.1)*100
+Hg_metals$threshold_wet <- (Hg_metals$Hg/0.1)*100
+colnames(Hg_metals)[which(names(Hg_metals) == "Hg")] <- "concentration"
+
+cd_ast_data <- as.data.frame(rbind(cd_metals, as_metals))
+pb_hg_asi_data <- as.data.frame(rbind(asi_metals, Pb_metals)) #,Hg_metals))
+asi_pb_data <- as.data.frame(rbind(asi_metals, Pb_metals))
+
+cd_metals$blade_location<- fct_relevel(cd_metals$blade_location, c("bottom", "mid","top"))
+cd_metals$site<- fct_relevel(cd_metals$site, c("SFARM", "NFARM","GAL", "PIG", "RAM", "TKR", "EAG", "BK", "MIS", "NORM", "BRK", "ATL"))
+
+as_metals$blade_location<- fct_relevel(as_metals$blade_location, c("bottom", "mid","top"))
+as_metals$site<- fct_relevel(as_metals$site, c("SFARM", "NFARM","GAL", "PIG", "RAM", "TKR", "EAG", "BK", "MIS", "NORM", "BRK", "ATL"))
+
+asi_metals$blade_location<- fct_relevel(asi_metals$blade_location, c("bottom", "mid","top"))
+asi_metals$site<- fct_relevel(asi_metals$site, c("SFARM", "NFARM","GAL", "PIG", "RAM", "TKR", "EAG", "BK", "MIS", "NORM", "BRK", "ATL"))
+
+Pb_metals$blade_location<- fct_relevel(Pb_metals$blade_location, c("bottom", "mid","top"))
+Pb_metals$site<- fct_relevel(Pb_metals$site, c("SFARM", "NFARM","GAL", "PIG", "RAM", "TKR", "EAG", "BK", "MIS", "NORM", "BRK", "ATL"))
+
+Hg_metals$blade_location<- fct_relevel(Hg_metals$blade_location, c("bottom", "mid","top"))
+Hg_metals$site<- fct_relevel(Hg_metals$site, c("SFARM", "NFARM","GAL", "PIG", "RAM", "TKR", "EAG", "BK", "MIS", "NORM", "BRK", "ATL"))
+
+                                
+```
+
+```{r, data for averages (maps), echo = FALSE}
+#set up datasets with averages and standard error by site
+Cadmium <- Metals %>%
+  dplyr::select(c(Cd, site, blade_location, lat, long))  %>%
+  group_by(site, blade_location, lat, long) %>%
+  summarize(avg = mean(Cd), n = n(), sd = sd(Cd), se = sd/sqrt(n))
+  Cadmium$metal_type <- "Cadmium"
+
+#remove farmed samples that do not have inorganic arsenic analysis
+Arsenic_inorganic <- Metals[!(Metals$Inorganic_As=="na"),]
+Arsenic_inorganic$Inorganic_As <- as.numeric(Arsenic_inorganic$Inorganic_As)
+Arsenic_inorganic <- Arsenic_inorganic %>%
+  dplyr::select(c(Inorganic_As, site, blade_location, lat, long))  %>%
+  group_by(site, blade_location, lat, long) %>%
+  summarize(avg = mean(Inorganic_As), n = n(), sd = sd(Inorganic_As), se = sd/sqrt(n))
+Arsenic_inorganic$metal_type <- "Inorganic_Arsenic"
+
+Arsenic_Total <- Metals %>%
+  dplyr::select(c(Total_As, site, blade_location, lat, long))  %>%
+  group_by(site, blade_location, lat, long) %>%
+  summarize(avg = mean(Total_As), n = n(), sd = sd(Total_As), se = sd/sqrt(n))
+Arsenic_Total$metal_type <- "Total_Arsenic"
+
+Lead <- Metals %>%
+  dplyr::select(c(Pb, site, blade_location, lat, long))  %>%
+  group_by(site, blade_location, lat, long) %>%
+  summarize(avg = mean(Pb), n = n(), sd = sd(Pb), se = sd/sqrt(n))
+Lead$metal_type <- "Lead"
+
+Mercury <- Metals %>%
+  dplyr::select(c(Hg, site, blade_location, lat, long))  %>%
+  group_by(site, blade_location, lat, long) %>%
+  summarize(avg = mean(Hg), n = n(), sd = sd(Hg), se = sd/sqrt(n))
+Mercury$metal_type <- "Mercury"
+
+Iron <- Metals %>%
+  dplyr::select(c(Fe, site))  %>%
+  group_by(site) %>%
+  summarize(avg = mean(Fe), n = n(), sd = sd(Fe), se = sd/sqrt(n))
+
+#dataset of all averages for a table
+all_avg_data <- as.data.frame(rbind(Cadmium, Arsenic_inorganic, Arsenic_Total, Mercury, Lead))
+
+library(flextable)
+flextable(all_avg_data)
+
+#reorder factor levels for blade location
+Cadmium$blade_location<- fct_relevel(Cadmium$blade_location, c("top", "bottom"))
+Arsenic_inorganic$blade_location<- fct_relevel(Arsenic_inorganic$blade_location, c("top", "bottom"))
+Arsenic_Total$blade_location<- fct_relevel(Arsenic_Total$blade_location, c("top", "bottom"))
+Lead$blade_location<- fct_relevel(Lead$blade_location, c("top", "bottom"))
+Mercury$blade_location<- fct_relevel(Mercury$blade_location, c("top", "bottom"))
+Iron$blade_location<- fct_relevel(Iron$blade_location, c("top", "mid", "bottom"))
+
+#sites to be south to north with farms at beginning 
+Cadmium$site<- fct_relevel(Cadmium$site, c("SFARM", "NFARM","GAL", "PIG", "RAM", "TKR", "EAG", "BK", "MIS", "NORM", "BRK", "ATL"))
+Arsenic_inorganic$site<- fct_relevel(Arsenic_inorganic$site, c("SFARM", "NFARM","GAL", "PIG", "RAM", "TKR", "EAG", "BK", "MIS", "NORM", "BRK", "ATL"))
+Arsenic_Total$site<- fct_relevel(Arsenic_Total$site, c("SFARM", "NFARM","GAL", "PIG", "RAM", "TKR", "EAG", "BK", "MIS", "NORM", "BRK", "ATL"))
+Lead$site<- fct_relevel(Lead$site, c("SFARM", "NFARM","GAL", "PIG", "RAM", "TKR", "EAG", "BK", "MIS", "NORM", "BRK", "ATL"))
+Mercury$site<- fct_relevel(Mercury$site, c("SFARM", "NFARM","GAL", "PIG", "RAM", "TKR", "EAG", "BK", "MIS", "NORM", "BRK", "ATL"))
+Iron$site<- fct_relevel(Iron$site, c("SFARM", "NFARM","GAL", "PIG", "RAM", "TKR", "EAG", "BK", "MIS", "NORM", "BRK", "ATL"))
+```
+
+```{r, Data for faceted maps}
+str(all_avg_data)
+all_maps_data <- all_avg_data %>%
+  dplyr::select(c(site, blade_location, avg, sd, n, metal_type, lat, long))
+str(all_maps_data)
+all_maps_data$site <- as.factor(all_maps_data$site)
+all_maps_data$blade_location <- as.factor(all_maps_data$blade_location)
+all_maps_data$metal_type <- as.factor(all_maps_data$metal_type)
+
+#remove SFARM and NFARM from the dataframe
+all_maps_data <- all_maps_data %>%
+  dplyr::filter(site != "NFARM") %>%
+  filter(site != "SFARM")
+
+surficial_sediment <- st_read("Surficial Sediments/maps_2021/sediment_data/MORIS_OM_SURFICIAL_SEDIMENTS_POLYPolygon.shp")
+#load MA boundaries data
+ma_boundaries <- st_read("Surficial Sediments/maps_2021/boundaries/GISDATA_TOWNSSURVEY_ARCLine.shp")
+ma_boundaries_towns <- st_read("Surficial Sediments/maps_2021/boundaries/TOWNSSURVEY_POLY.shp")
+#load bathymetry data
+bathymetry_polys <- st_read("Surficial Sediments/maps_2021/bathymetry_data/GISDATA_BATHYMGM_POLYPolygon.shp")
+
+ma_towns <- ma_boundaries_towns %>%
+  dplyr::select(c(TOWN)) %>%
+  dplyr::filter(TOWN == "GLOUCESTER" | TOWN == "SALEM" | TOWN == "BOSTON")
+
+#########Create Data Frame for each Site Type###########
+contamination_sites <- data.frame(longitude = c(-70.876, -70.839, -70.657316, -71.044129, -71.045572, -70.633841),
+       latitude = c(42.536, 42.535, 42.613237, 42.370315, 42.326800, 42.618273),
+       Source = c("Contamination Source","Contamination Source","Contamination Source","Contamination Source","Contamination Source","Contamination Source"))
+
+#early_sampled_sites <- data.frame(longitude = c(-70.786798, -70.784266, -70.813),  latitude = c(42.537318, 42.532353, 42.525459), Sampled = c("Sampled 2018","Sampled 2018","Sampled 2018"))
+
+#turn into sf object
+contamination_sites <- st_as_sf(contamination_sites, coords = c("longitude", "latitude"), crs = 4326, agr = "constant")
+all_maps_data <- st_as_sf(all_maps_data, coords = c("long", "lat"), crs = 4326, agr = "constant")
+
+#load non-MA land and shift X coordinates by 360 degrees to fix offset
+mp <- Rgshhs("Surficial Sediments/maps_2021/boundaries/gshhs_f.b", xlim=c(-72, -64)+360, ylim=c(40, 43))$SP %>%
+  st_as_sf() 
+
+mp_shift <- (st_geometry(mp)-c(360,0)) %>%
+  st_set_crs(st_crs(mp))
+
+#check coordinate reference system (CRS) of each data layer
+#they all must be in the same CRS
+#use st_transform to convert them if needed
+
+bathymetry_polys <- st_transform(bathymetry_polys, st_crs(mp_shift))
+ma_boundaries <- st_transform(ma_boundaries, st_crs(mp_shift))
+ma_towns <- st_transform(ma_towns, st_crs(mp_shift))
+contamination_sites <- st_transform(contamination_sites, st_crs(mp_shift))
+all_maps_data <- st_transform(all_maps_data, st_crs(mp_shift))
+
+ma_towns_cut <- ma_towns %>%
+  filter(row_number() %in% c(2,50, 55))
+
+#crop the larger data layers
+mp_shift_crop <- st_crop(mp_shift, 
+                      xmin = -71.09,
+                      xmax = -70.56,
+                      ymin = 42.26,
+                      ymax = 42.65)
+bathymetry_polys_crop <- st_crop(bathymetry_polys, 
+                      xmin = -71.09,
+                      xmax = -70.56,
+                      ymin = 42.26,
+                      ymax = 42.65)
+ma_boundaries_crop <- st_crop(ma_boundaries,
+                      xmin = -71.09,
+                      xmax = -70.56,
+                      ymin = 42.26,
+                      ymax = 42.65)
+ma_towns_crop <- st_crop(ma_towns_cut,
+                      xmin = -71.09,
+                      xmax = -70.56,
+                      ymin = 42.26,
+                      ymax = 42.65)
+
+#If there are multiple polygons for each municipality you can collapse them using this code:
+#ma_towns_crop <- ma_towns_crop %>%
+ #group_by(TOWN) %>%
+ #summarize(geometry = st_union(geometry))
+
+
+```
+
+####Figures####
+
+```{r, dry weight threshold figures, echo = FALSE}
+
+#plot for total arsenic
+thresh_plot_asT <- ggplot(as_metals, aes(x = site, y = threshold_dry)) +
+  geom_linerange(aes(x = site, ymin = 100, ymax = threshold_dry, group = blade_location),
+                 size = 0.10, color = "#0A0A0A", 
+                 position = position_jitter(seed = 123, width = 0.4)) +
+  facet_wrap(~metal_type) +
+  geom_point(aes(color = blade_location),
+            position = position_jitter(seed = 123, width = 0.4), size = 1.35,  shape = 16) +
+  scale_color_manual(values = c("#782391","#399F2E","#ffa600"),
+                    labels = c("base of blade", "mid blade", "distal tip"))+ 
+   ggtitle(element_blank()) +
+  ylab("% of MCL threshold") +
+  xlab("Sample site") +
+  labs(color = "Location on blade") +
+  theme_bw() +
+  theme(legend.position = 'none') +
+  theme(panel.border = element_blank(),
+        axis.text.x = element_text(angle = 60, hjust = 0.7))+
+  theme(plot.margin = unit(c(0, 0.2, 0, 0.1), "cm")) +
+  theme(axis.text.x = element_text(size = 7),
+        axis.text.y = element_text(size = 8)) +
+  geom_hline(yintercept = 100, color = "#800000FF", size = 0.8, linetype = "dashed") +
+  annotate("rect", xmin = 0.5, xmax = 2.5, ymin = -3, ymax = 310,
+           alpha = .2, color = "darkgrey", fill = "grey") +
+  guides(color = guide_legend(override.aes = list(size = 1.5)))
+
+thresh_plot_asT
+#ggsave("thresh_plot_asT.tiff", plot = thresh_plot_asT, dpi = 600)
+
+#plot for inorganic arsenic
+thresh_plot_asI <- ggplot(asi_metals, aes(x = site, y = threshold_dry)) +
+  geom_linerange(aes(x = site, ymin = 100, ymax = threshold_dry, group = blade_location),
+                 color = "#0A0A0A", size = 0.10,
+                 position = position_jitter(seed = 123, width = 0.4)) +
+  facet_wrap(~metal_type) +
+  geom_point(aes(color = blade_location),
+  position = position_jitter(seed = 123, width = 0.4), size = 1.35,  shape = 16) +
+  scale_color_manual(values = c("#782391","#399F2E","#ffa600"),
+                    labels = c("base of blade", "mid blade", "distal tip"))+ 
+   ggtitle(element_blank()) +
+  ylab("% of MCL threshold") +
+  xlab("Sample site") +
+  labs(color = "Location on blade") +
+  theme_bw() +
+  theme(legend.position = 'none')+
+  theme(panel.border = element_blank(),
+        axis.text.x = element_text(angle = 60, hjust = 0.7))+
+  theme(plot.margin = unit(c(0, 0.2, 0, 0.1), "cm")) +
+  theme(axis.text.x = element_text(size = 7),
+        axis.text.y = element_text(size = 8)) +
+  geom_hline(yintercept = 100, color = "#800000FF", size = 0.8, linetype = "dashed") +
+  annotate("rect", xmin = 0.5, xmax = 2.5, ymin = -3, ymax = 310,
+           alpha = .2, color = "darkgrey", fill = "grey") +
+  guides(color = guide_legend(override.aes = list(size = 1.5))) 
+thresh_plot_asI
+#ggsave("thresh_plot_asI.tiff", plot = thresh_plot_asI, dpi = 600)
+
+#plot for Cadmium
+thresh_plot_cd <- ggplot(cd_metals, aes(x = site, y = threshold_dry)) +
+  geom_linerange(aes(x = site, ymin = 100, ymax = threshold_dry, group = blade_location),
+                 color = "#0A0A0A", size = 0.10,
+                 position = position_jitter(seed = 123, width = 0.4)) +
+  facet_wrap(~metal_type) +
+  geom_point(aes(color = blade_location),
+            position = position_jitter(seed = 123, width = 0.4), size = 1.35,  shape = 16) +
+  scale_color_manual(values = c("#782391","#399F2E","#ffa600"),
+                    labels = c("base of blade", "mid blade", "distal tip"))+ 
+  ggtitle(element_blank()) +
+  ylab("% of MCL threshold") +
+  xlab("Sample site") +
+  labs(color = "Location on blade") +
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        axis.text.x = element_text(angle = 60, hjust = 0.8)) +
+  theme(legend.position = 'none')+
+  theme(plot.margin = unit(c(0.2, 0.2, 0, 0.1), "cm")) +
+  theme(axis.text.x = element_text(size = 7),
+        axis.text.y = element_text(size = 8)) +
+  geom_hline(yintercept = 100, color = "#800000FF", size = 0.7, linetype = "dashed") +
+  annotate("rect", xmin = 0.5, xmax = 2.5, ymin = -3, ymax = 330,
+           alpha = .2, color = "darkgrey", fill = "grey") +
+  guides(color = guide_legend(override.aes = list(size = 1.5)))
+thresh_plot_cd
+#ggsave("thresh_plot_cd.tiff", plot = thresh_plot_cd, dpi = 600)
+
+#plot for lead
+thresh_plot_pb <- ggplot(Pb_metals, aes(x = site, y = threshold_dry)) +
+  geom_linerange(aes(x = site, ymin = 100, ymax = threshold_dry, group = blade_location),
+                 color = "#0A0A0A", size = 0.10,
+                 position = position_jitter(seed = 123, width = 0.4)) +
+  facet_wrap(~metal_type) +
+  geom_point(aes(color = blade_location),
+            position = position_jitter(seed = 123, width = 0.4), size = 1.35,  shape = 16) +
+  scale_color_manual(values = c("#782391","#399F2E","#ffa600"),
+                    labels = c("base of blade", "mid blade", "distal tip"))+ 
+  ggtitle(element_blank()) +
+  ylab("% of MCL threshold") +
+  xlab("Sample site") +
+  labs(color = "Location on blade") +
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        axis.text.x = element_text(angle = 60, hjust = 0.8)) +
+  theme(legend.position = 'none')+
+  theme(plot.margin = unit(c(0.2, 0.2, 0, 0.1), "cm")) +
+  theme(axis.text.x = element_text(size = 7),
+        axis.text.y = element_text(size = 8)) +
+  geom_hline(yintercept = 100, color = "#800000FF", size = 0.7, linetype = "dashed") +
+annotate("rect", xmin = 0.5, xmax = 2.5, ymin = -3, ymax = 300,
+           alpha = .2, color = "darkgrey", fill = "grey") +
+  guides(color = guide_legend(override.aes = list(size = 1.5)))
+thresh_plot_pb
+#ggsave("thresh_plot_pb.tiff", plot = thresh_plot_pb, dpi = 600)
+
+#plot for mercury with legend
+
+thresh_plot_hg_legend <- ggplot(Hg_metals, aes(x = site, y = threshold_dry)) +
+  geom_linerange(aes(x = site, ymin = 100, ymax = threshold_dry, group = blade_location),
+                 color = "#0A0A0A", size = 0.10,
+                 position = position_jitter(seed = 123, width = 0.4)) +
+  facet_wrap(~metal_type) +
+  geom_point(aes(color = blade_location),
+  position = position_jitter(seed = 123, width = 0.4), size = 1.35,  shape = 16) +
+  scale_color_manual(values = c("#782391","#399F2E","#ffa600"),
+                    labels = c("base of blade", "mid blade", "distal tip"))+ 
+  ggtitle(element_blank()) +
+  ylab("% of MCL threshold") +
+  xlab("Sample site") +
+  labs(color = "Location on blade") +
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        axis.text.x = element_text(angle = 60, hjust = 0.8)) +
+  theme(legend.position = 'right') +
+  theme(plot.margin = unit(c(0.2, 0.2, 0, 0.1), "cm")) +
+  theme(axis.text.x = element_text(size = 7),
+        axis.text.y = element_text(size = 8)) +
+  geom_hline(yintercept = 100, color = "#800000FF", size = 0.7, linetype = "dashed") + annotate("rect", xmin = 0.5, xmax = 2.5, ymin = -3, ymax = 300,
+           alpha = .2, color = "darkgrey", fill = "grey") +
+  guides(color = guide_legend(override.aes = list(size = 2)))
+thresh_plot_hg_legend
+
+#equation to pull legend into an object to facet
+get_legend <- function(myggplot){
+  tmp <- ggplot_gtable(ggplot_build(myggplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)
+}
+threshold_legend <- get_legend(thresh_plot_hg_legend)
+
+#plot for mercury without legend
+thresh_plot_hg <- ggplot(Hg_metals, aes(x = site, y = threshold_dry)) +
+  geom_linerange(aes(x = site, ymin = 100, ymax = threshold_dry, group = blade_location),
+                 color = "#0A0A0A", size = 0.10,
+                 position = position_jitter(seed = 123, width = 0.4)) +
+  facet_wrap(~metal_type) +
+  geom_point(aes(color = blade_location),
+  position = position_jitter(seed = 123, width = 0.4), size = 1.35,  shape = 16) +
+  scale_color_manual(values = c("#782391","#399F2E","#ffa600"),
+                    labels = c("base of blade", "mid blade", "distal tip"))+ 
+  ggtitle(element_blank()) +
+  ylab("% of MCL threshold") +
+  xlab("Sample site") +
+  labs(color = "Location on blade") +
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        axis.text.x = element_text(angle = 60, hjust = 0.8)) +
+  theme(legend.position = 'none') +
+  theme(plot.margin = unit(c(0.2, 0.2, 0, 0.1), "cm")) +
+  theme(axis.text.x = element_text(size = 7),
+        axis.text.y = element_text(size = 8)) +
+  geom_hline(yintercept = 100, color = "#800000FF", size = 0.7, linetype = "dashed") + annotate("rect", xmin = 0.5, xmax = 2.5, ymin = -3, ymax = 300,
+           alpha = .2, color = "darkgrey", fill = "grey")
+thresh_plot_hg
+#ggsave("thresh_plot_hg.tiff", plot = thresh_plot_hg, dpi = 600)
+
+#arrange all plots together into one figure
+library(ggpubr)
+
+threshold_plot <- ggarrange(thresh_plot_asT, thresh_plot_asI, thresh_plot_cd, thresh_plot_pb, thresh_plot_hg, threshold_legend, ncol = 2, nrow = 3)
+
+ggsave("thresh_plot_all.tiff", plot = threshold_plot, width = 180, height = 170, units = "mm", dpi = 600)
+
+
+```
+
+```{r, dry weight averages figures for supplement, echo = FALSE}
+cd_metals$blade_location<- fct_relevel(cd_metals$blade_location, c("bottom", "mid","top"))
+cd_metals$site<- fct_relevel(cd_metals$site, c("SFARM", "NFARM","GAL", "PIG", "RAM", "TKR", "EAG", "BK", "MIS", "NORM", "BRK", "ATL"))
+
+as_metals$blade_location<- fct_relevel(as_metals$blade_location, c("bottom", "mid","top"))
+as_metals$site<- fct_relevel(as_metals$site, c("SFARM", "NFARM","GAL", "PIG", "RAM", "TKR", "EAG", "BK", "MIS", "NORM", "BRK", "ATL"))
+
+asi_metals$blade_location<- fct_relevel(asi_metals$blade_location, c("bottom", "mid","top"))
+asi_metals$site<- fct_relevel(asi_metals$site, c("SFARM", "NFARM","GAL", "PIG", "RAM", "TKR", "EAG", "BK", "MIS", "NORM", "BRK", "ATL"))
+
+Pb_metals$blade_location<- fct_relevel(Pb_metals$blade_location, c("bottom", "mid","top"))
+Pb_metals$site<- fct_relevel(Pb_metals$site, c("SFARM", "NFARM","GAL", "PIG", "RAM", "TKR", "EAG", "BK", "MIS", "NORM", "BRK", "ATL"))
+
+Hg_metals$blade_location<- fct_relevel(Hg_metals$blade_location, c("bottom", "mid","top"))
+Hg_metals$site<- fct_relevel(Hg_metals$site, c("SFARM", "NFARM","GAL", "PIG", "RAM", "TKR", "EAG", "BK", "MIS", "NORM", "BRK", "ATL"))
+
+#plot for total arsenic
+avg_plot_asT <- ggplot(as_metals, aes(x = site, y = concentration)) +
+  geom_linerange(aes(x = site, ymin = 40, ymax = concentration, group = blade_location),
+                 #color = "#0A0A0A", 
+                 size = 0.10,
+                 position = position_jitter(seed = 123, width = 0.4)) +
+  geom_point(aes(color = blade_location),
+            position = position_jitter(seed = 123, width = 0.4), size = 1.3,  shape = 16) +
+  scale_color_manual(values = c("#782391","#399F2E","#ffa600"),
+                    labels = c("base of blade", "mid blade", "distal tip"))+ 
+   ggtitle(element_blank()) +
+  ylab("AsT concentration (ppm)") +
+  xlab("Sample site") +
+  labs(color = "Location on blade") +
+  theme_bw() +
+  theme(legend.position = 'top') +
+  theme(panel.border = element_blank(),
+        axis.text.x = element_text(angle = 60, hjust = 0.7))+
+  theme(plot.margin = unit(c(0, 0.2, 0, 0.1), "cm")) +
+  theme(axis.text.x = element_text(size = 7),
+        axis.text.y = element_text(size = 8)) +
+  geom_hline(yintercept = 40, color = "#800000FF", size = 0.8, linetype = "dashed") +
+  annotate("rect", xmin = 0.5, xmax = 2.5, ymin = 0, ymax = 150,
+           alpha = .2, color = "darkgrey", fill = "grey") +
+  guides(color = guide_legend(override.aes = list(size = 1.5)))
+
+avg_plot_asT
+#ggsave("avg_plot_asT.tiff", plot = avg_plot_asT, dpi = 600)
+
+#plot for inorganic arsenic
+avg_plot_asI <- ggplot(asi_metals, aes(x = site, y = concentration)) +
+  geom_linerange(aes(x = site, ymin = 2, ymax = concentration, group = blade_location),
+                 color = "#0A0A0A", size = 0.10,
+                 position = position_jitter(seed = 123, width = 0.4)) +
+  geom_point(aes(color = blade_location),
+  position = position_jitter(seed = 123, width = 0.4), size = 1.3,  shape = 16) +
+  scale_color_manual(values = c("#782391","#399F2E","#ffa600"),
+                    labels = c("base of blade", "mid blade", "distal tip"))+ 
+   ggtitle(element_blank()) +
+  ylab("iAs concentration (ppm)") +
+  xlab("Sample site") +
+  labs(color = "Location on blade") +
+  theme_bw() +
+  theme(legend.position = 'top')+
+  theme(panel.border = element_blank(),
+        axis.text.x = element_text(angle = 60, hjust = 0.7))+
+  theme(plot.margin = unit(c(0, 0.2, 0, 0.1), "cm")) +
+  theme(axis.text.x = element_text(size = 7),
+        axis.text.y = element_text(size = 8)) +
+  geom_hline(yintercept = 2, color = "#800000FF", size = 0.8, linetype = "dashed") +
+  annotate("rect", xmin = 0.5, xmax = 2.5, ymin = -0.2, ymax = 2.5,
+           alpha = .2, color = "darkgrey", fill = "grey") +
+  guides(color = guide_legend(override.aes = list(size = 1.5))) 
+avg_plot_asI
+#ggsave("avg_plot_asI.tiff", plot = avg_plot_asI, dpi = 600)
+
+#plot for Cadmium
+avg_plot_cd <- ggplot(cd_metals, aes(x = site, y = concentration)) +
+  geom_linerange(aes(x = site, ymin = 1, ymax = concentration, group = blade_location),
+                 color = "#0A0A0A", size = 0.10,
+                 position = position_jitter(seed = 123, width = 0.4)) +
+  geom_point(aes(color = blade_location),
+            position = position_jitter(seed = 123, width = 0.4), size = 1.3,  shape = 16) +
+  scale_color_manual(values = c("#782391","#399F2E","#ffa600"),
+                    labels = c("base of blade", "mid blade", "distal tip"))+ 
+  ggtitle(element_blank()) +
+  ylab("Cd concentration (ppm)") +
+  xlab("Sample site") +
+  labs(color = "Location on blade") +
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        axis.text.x = element_text(angle = 60, hjust = 0.8)) +
+  theme(legend.position = 'top')+
+  theme(plot.margin = unit(c(0.2, 0.2, 0, 0.1), "cm")) +
+  theme(axis.text.x = element_text(size = 7),
+        axis.text.y = element_text(size = 8)) +
+  geom_hline(yintercept = 1, color = "#800000FF", size = 0.7, linetype = "dashed") +
+  annotate("rect", xmin = 0.5, xmax = 2.5, ymin = -.2, ymax = 3.5,
+           alpha = .2, color = "darkgrey", fill = "grey") +
+  guides(color = guide_legend(override.aes = list(size = 1.5)))
+avg_plot_cd
+#ggsave("avg_plot_cd.tiff", plot = avg_plot_cd, dpi = 600)
+
+#plot for lead
+avg_plot_pb <- ggplot(Pb_metals, aes(x = site, y = concentration)) +
+  geom_linerange(aes(x = site, ymin = 10, ymax = concentration, group = blade_location),
+                 color = "#0A0A0A", size = 0.10,
+                 position = position_jitter(seed = 123, width = 0.4)) +
+  geom_point(aes(color = blade_location),
+            position = position_jitter(seed = 123, width = 0.4), size = 1.3,  shape = 16) +
+  scale_color_manual(values = c("#782391","#399F2E","#ffa600"),
+                    labels = c("base of blade", "mid blade", "distal tip"))+ 
+  ggtitle(element_blank()) +
+  ylab("Pb concentration (ppm)") +
+  xlab("Sample site") +
+  labs(color = "Location on blade") +
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        axis.text.x = element_text(angle = 60, hjust = 0.8)) +
+  theme(legend.position = 'top')+
+  theme(plot.margin = unit(c(0.2, 0.2, 0, 0.1), "cm")) +
+  theme(axis.text.x = element_text(size = 7),
+        axis.text.y = element_text(size = 8)) +
+  geom_hline(yintercept = 10, color = "#800000FF", size = 0.7, linetype = "dashed") +
+annotate("rect", xmin = 0.5, xmax = 2.5, ymin = -.2, ymax = 12,
+           alpha = .2, color = "darkgrey", fill = "grey") +
+  guides(color = guide_legend(override.aes = list(size = 1.5)))
+avg_plot_pb
+#ggsave("avg_plot_pb.tiff", plot = avg_plot_pb, dpi = 600)
+
+#plot for mercury
+avg_plot_hg <- ggplot(Hg_metals, aes(x = site, y = concentration)) +
+  geom_linerange(aes(x = site, ymin = 0.1, ymax = concentration, group = blade_location),
+                 color = "#0A0A0A", size = 0.10,
+                 position = position_jitter(seed = 123, width = 0.4)) +
+  geom_point(aes(color = blade_location),
+  position = position_jitter(seed = 123, width = 0.4), size = 1.3,  shape = 16) +
+  scale_color_manual(values = c("#782391","#399F2E","#ffa600"),
+                    labels = c("base of blade", "mid blade", "distal tip"))+ 
+  ggtitle(element_blank()) +
+  ylab("Hg concentration (ppm)") +
+  xlab("Sample site") +
+  labs(color = "Location on blade") +
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        axis.text.x = element_text(angle = 60, hjust = 0.8)) +
+  theme(legend.position = 'top') +
+  theme(plot.margin = unit(c(0.2, 0.2, 0, 0.1), "cm")) +
+  theme(axis.text.x = element_text(size = 7),
+        axis.text.y = element_text(size = 8)) +
+  geom_hline(yintercept = 0.1, color = "#800000FF", size = 0.7, linetype = "dashed") + annotate("rect", xmin = 0.5, xmax = 2.5, ymin = -.02, ymax = 0.25,
+           alpha = .2, color = "darkgrey", fill = "grey") +
+  guides(color = guide_legend(override.aes = list(size = 1.5)))
+avg_plot_hg
+#ggsave("avg_plot_hg.tiff", plot = avg_plot_hg, dpi = 600)
+
+```
+
+```{r, figures with metals averages by site}
+#plot it
+Cd_plot <- ggplot(Cadmium, aes(x = site, y = avg, group = site, color = blade_location)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = avg-se, ymax = avg+se), width = .2) +
+  theme_classic() +
+  scale_color_manual(values = c("#ffa600","#399F2E","#306B6A")) +
+  ggtitle("Cadmium") +
+  theme(axis.text.x = element_text(angle=-56, hjust = 0)) +
+  geom_hline(yintercept = 0.5, color = "dark red", size = 0.5) +
+  geom_hline(yintercept = 1.0, color = "red", size = 0.5) 
+
+Asi_plot <-ggplot(Arsenic_inorganic, aes(x = site, y = avg, group = site, color = blade_location)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = avg-se, ymax = avg+se), width = .2) +
+  theme_classic() +
+  scale_color_manual(values = c("#ffa600","#399F2E","#306B6A")) +
+  ggtitle("Inorganic As") +
+  theme(axis.text.x = element_text(angle=-56, hjust = 0)) +
+  geom_hline(yintercept = 2.0, color = "red", size = 0.5)
+
+AsT_plot <- ggplot(Arsenic_Total, aes(x = site, y = avg, group = site, color = blade_location)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = avg-se, ymax = avg+se), width = .2) +
+  theme_classic() +
+  scale_color_manual(values = c("#ffa600","#399F2E","#306B6A")) +
+  ggtitle("Total As") +
+  theme(axis.text.x = element_text(angle=-56, hjust = 0)) +
+  geom_hline(yintercept = 40, color = "red", size = 0.5)
+
+Hg_plot <- ggplot(Mercury, aes(x = site, y = avg, group = site, color = blade_location)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = avg-se, ymax = avg+se), width = .2) +
+  theme_classic() +
+  scale_color_manual(values = c("#ffa600","#399F2E","#306B6A")) +
+  ggtitle("Mercury") +
+  theme(axis.text.x = element_text(angle=-56, hjust = 0)) +
+  geom_hline(yintercept = 0.1, color = "red", size = 0.5)
+ 
+Pb_plot <- ggplot(Lead, aes(x = site, y = avg, group = site, color = blade_location)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = avg-se, ymax = avg+se), width = .2) +
+  theme_classic() +
+  scale_color_manual(values = c("#ffa600","#399F2E","#306B6A")) +
+  ggtitle("Lead") +
+  theme(axis.text.x = element_text(angle=-56, hjust = 0)) +
+  geom_hline(yintercept = 10, color = "red", size = 0.5)
+
+Fe_plot <- ggplot(Iron, aes(x = site, y = avg, group = site)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = avg-se, ymax = avg+se), width = .2) +
+  theme_classic() +
+  ggtitle("Iron") +
+  theme(axis.text.x = element_text(angle=-56, hjust = 0)) 
+
+#all of them together
+library(ggpubr)
+all_plots <- ggarrange(Cd_plot, AsT_plot, Asi_plot, Hg_plot, Pb_plot, ncol = 3, nrow = 2)
+
+
+```
+
+```{r, correlation figure, echo = FALSE}
+
+#pull metals columns for a correlation matrix
+Metals_matrix2 <- Metals %>%
+  dplyr::select(c(Zn, Se, Ni, Mn, Cu, Cr, Fe, Hg, Pb, Cd, Inorganic_As, Total_As, P))
+
+#rename columns
+colnames(Metals_matrix2)[which(names(Metals_matrix2) == "P")] <- "Phosphorus"
+colnames(Metals_matrix2)[which(names(Metals_matrix2) == "Inorganic_As")] <- "iAs"
+colnames(Metals_matrix2)[which(names(Metals_matrix2) == "Total_As")] <- "AsT"
+
+#remove nas
+Metals_matrix2 <- mutate_all(Metals_matrix2, na_if, 'na') 
+Metals_matrix2 <- na.omit(Metals_matrix2)
+str(Metals_matrix2)
+Metals_matrix2$iAs <- as.numeric(Metals_matrix2$iAs)
+
+correlations <- cor(Metals_matrix2) %>%
+  as_tibble(rownames = 'variable1') %>%
+  pivot_longer(cols = -1, names_to = 'variable2', values_to = 'correlation')
+
+#matrix of squares with correlations as gradient
+correlations %>%
+  ggplot(aes(variable1, variable2, fill = correlation)) +
+  geom_tile(col = 'white') +
+  labs(x = element_blank(), y = element_blank()) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#visualize with bars instead of colored tiles using a new variable that describes the pairs of all variables. AKA we don't want to use the same pair twice.
+
+triangle_correlations <- cor(Metals_matrix2) * lower.tri(cor(Metals_matrix2))
+triangle_correlations[1:4, 1:4]
+
+#Then transform into a tibble, filter out the zero correlations, construct pair labels, order pairs by their correlation
+
+correlations <- triangle_correlations %>%
+  as_tibble(rownames = 'variable1') %>%
+  pivot_longer(cols = -1, names_to = 'variable2', values_to = 'correlation') %>%
+  filter(abs(correlation) >0) %>%
+  mutate(
+    pair = paste(variable1, variable2, sep = '+'),
+    pair = fct_reorder(pair, correlation)
+    )
+
+correlations %>% print(n = 5)
+
+#visualize with geom_col()
+library(viridisLite)
+my_col <- viridisLite::mako(3)[2]
+correlations %>%
+  ggplot(aes(x = correlation, y = pair)) +
+  geom_col(fill = my_col) +
+  labs(x = 'Correlation')
+
+#move labels to bars
+nudge_x <- 0.01
+text_size <- 2.5
+grid_color = 'grey80'
+text_color = 'grey40'
+
+correlations %>%
+  ggplot(aes(y = pair, x = correlation)) +
+  geom_col(fill = my_col) +
+  geom_text(
+    aes(x = 0, label = pair),
+    size = text_size,
+    #change horizontal justification based on correlation value
+    #This moves labels to left or right of bars
+    hjust = if_else(correlations$correlation > 0, 1, 0),
+    #Same trick just for moving the labels a tiny bit
+    nudge_x = if_else(correlations$correlation > 0, -nudge_x, nudge_x)
+  ) +
+  scale_y_discrete(breaks = NULL) +
+  labs(x = 'Correlation', y = element_blank()) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_line(size = 0.25, linetype = 2, color = grid_color)
+  )
+
+#Use lolipops to visualize correlation matrices
+segment_size <- 0.8
+highlight <- as.data.frame(correlations %>%
+  filter(pair == c("Phosphorus+AsT", "AsT+Cd", "Phosphorus+iAs", "iAs+Fe")) %>%
+  pull(pair))
+
+
+highlight <- correlations %>%
+  filter(pair == "Phosphorus+AsT" | pair == "iAs+Fe" | pair == "AsT+Cd" |pair == "Phosphorus+iAs") %>%
+  pull(pair)
+
+highlight_color <- thematic::okabe_ito(6)[1]
+unhighlight_color <- 'grey40'
+
+figure_corr <- correlations %>% 
+  ggplot(aes(y = pair, x = correlation)) +
+  geom_point(col = if_else(correlations$pair %in% highlight, highlight_color, my_col)) +
+  geom_segment(aes(xend = 0, yend = pair), 
+  col = if_else(correlations$pair %in% highlight, highlight_color, my_col),
+  size = if_else(correlations$pair %in% highlight, segment_size + 0.3, segment_size)) +
+  geom_text(aes(x = 0, label = pair),
+  col = if_else(correlations$pair %in% highlight, highlight_color, unhighlight_color),
+  fontface = if_else(correlations$pair %in% highlight, 'bold', 'plain'),
+    hjust = if_else(correlations$correlation > 0, 1, 0),
+    nudge_x = if_else(correlations$correlation > 0, -nudge_x, nudge_x),
+    size = text_size) +
+  scale_y_discrete(breaks = NULL) +
+  labs(x = 'Correlation', y = element_blank()) +
+  theme_minimal() +
+  theme(panel.grid = element_line(size = 0.25, linetype = 2, color = grid_color))
+
+figure_corr
+ggsave("figure_corr.jpeg", plot = figure_corr, width = 150, height = 230, units = "mm", dpi = 600)
+
+
+```
+
+####Maps####
+
+```{r, Individual maps, echo = FALSE}
+#Cadmium
+cd_top_map <- tm_shape(bathymetry_polys_crop) +     
+  tm_fill(col = "#C6DBEF") +
+  tm_shape(mp_shift_crop) +
+  tm_polygons(col = "honeydew3",
+              lwd = 0.3) +
+  tm_shape(ma_boundaries_crop) +
+  tm_lines(lwd = 0.3) +
+  tm_legend(legend.outside = T) +
+  tm_shape(contamination_sites) +
+  tm_dots(size = 0.6, 
+          #choose shape based on type column
+          shape = "Source",
+          #change which shapes are used here
+          shapes = c(23), 
+          #also choose color based on type
+          col = "red3")+
+  tm_shape(maps_data) +
+  tm_bubbles("cd_top_avg", col = "cd_top_avg")+
+  #position is a number between 0-1 and specify the x,y location of the scale bar
+  tm_scale_bar(text.size = 0.48,
+               position = c(.45, .03)) +
+  tm_compass(type = "4star",
+             position = c(.8, .055),
+             size = 2.5)
+
+cd_top_map
+
+cd_bottom_map <- tm_shape(bathymetry_polys_crop) +     
+  tm_fill(col = "#C6DBEF") +
+  tm_shape(mp_shift_crop) +
+  tm_polygons(col = "honeydew3",
+              lwd = 0.3) +
+  tm_shape(ma_boundaries_crop) +
+  tm_lines(lwd = 0.3) +
+  tm_legend(legend.outside = T) +
+  tm_shape(contamination_sites) +
+  tm_dots(size = 0.6, 
+          #choose shape based on type column
+          shape = "Source",
+          #change which shapes are used here
+          shapes = c(23), 
+          #also choose color based on type
+          col = "red3")+
+  tm_shape(maps_data) +
+  tm_bubbles("cd_bottom_avg", col = "cd_bottom_avg")+
+  #position is a number between 0-1 and specify the x,y location of the scale bar
+  tm_scale_bar(text.size = 0.48,
+               position = c(.45, .03)) +
+  tm_compass(type = "4star",
+             position = c(.8, .055),
+             size = 2.5)
+cd_bottom_map <- grid.grab()
+
+library(cowplot)
+grid <- plot_grid(cd_bottom_map, cd_top_map)
+
+#Total arsenic
+
+asT_top_map <- tm_shape(bathymetry_polys_crop) +     
+  tm_fill(col = "#C6DBEF") +
+  tm_shape(mp_shift_crop) +
+  tm_polygons(col = "honeydew3",
+              lwd = 0.3) +
+  tm_shape(ma_boundaries_crop) +
+  tm_lines(lwd = 0.3) +
+  tm_legend(legend.outside = T) +
+  tm_shape(contamination_sites) +
+  tm_dots(size = 0.6, 
+          #choose shape based on type column
+          shape = "Source",
+          #change which shapes are used here
+          shapes = c(23), 
+          #also choose color based on type
+          col = "red3")+
+  tm_shape(maps_data) +
+  tm_bubbles("asT_top_avg", col = "asT_top_avg")+
+  #position is a number between 0-1 and specify the x,y location of the scale bar
+  tm_scale_bar(text.size = 0.48,
+               position = c(.45, .03)) +
+  tm_compass(type = "4star",
+             position = c(.8, .055),
+             size = 2.5)
+
+asT_top_map + grid.grab()
+
+asT_bottom_map <- tm_shape(bathymetry_polys_crop) +     
+  tm_fill(col = "#C6DBEF") +
+  tm_shape(mp_shift_crop) +
+  tm_polygons(col = "honeydew3",
+              lwd = 0.3) +
+  tm_shape(ma_boundaries_crop) +
+  tm_lines(lwd = 0.3) +
+  tm_legend(legend.outside = T) +
+  tm_shape(contamination_sites) +
+  tm_dots(size = 0.6, 
+          #choose shape based on type column
+          shape = "Source",
+          #change which shapes are used here
+          shapes = c(23), 
+          #also choose color based on type
+          col = "red3")+
+  tm_shape(maps_data) +
+  tm_bubbles("asT_bottom_avg", col = "asT_bottom_avg")+
+  #position is a number between 0-1 and specify the x,y location of the scale bar
+  tm_scale_bar(text.size = 0.48,
+               position = c(.45, .03)) +
+  tm_compass(type = "4star",
+             position = c(.8, .055),
+             size = 2.5)
+
+##Inorganic arsenic
+asI_top_map <- tm_shape(bathymetry_polys_crop) +     
+  tm_fill(col = "#C6DBEF") +
+  tm_shape(mp_shift_crop) +
+  tm_polygons(col = "honeydew3",
+              lwd = 0.3) +
+  tm_shape(ma_boundaries_crop) +
+  tm_lines(lwd = 0.3) +
+  tm_legend(legend.outside = T) +
+  tm_shape(contamination_sites) +
+  tm_dots(size = 0.6, 
+          #choose shape based on type column
+          shape = "Source",
+          #change which shapes are used here
+          shapes = c(23), 
+          #also choose color based on type
+          col = "red3")+
+  tm_shape(maps_data) +
+  tm_bubbles("asI_top_avg", col = "asI_top_avg")+
+  #position is a number between 0-1 and specify the x,y location of the scale bar
+  tm_scale_bar(text.size = 0.48,
+               position = c(.45, .03)) +
+  tm_compass(type = "4star",
+             position = c(.8, .055),
+             size = 2.5)
+
+
+asI_bottom_map <- tm_shape(bathymetry_polys_crop) +     
+  tm_fill(col = "#C6DBEF") +
+  tm_shape(mp_shift_crop) +
+  tm_polygons(col = "honeydew3",
+              lwd = 0.3) +
+  tm_shape(ma_boundaries_crop) +
+  tm_lines(lwd = 0.3) +
+  tm_legend(legend.outside = T) +
+  tm_shape(contamination_sites) +
+  tm_dots(size = 0.6, 
+          #choose shape based on type column
+          shape = "Source",
+          #change which shapes are used here
+          shapes = c(23), 
+          #also choose color based on type
+          col = "red3")+
+  tm_shape(maps_data) +
+  tm_bubbles("asI_bottom_avg", col = "asI_bottom_avg")+
+  #position is a number between 0-1 and specify the x,y location of the scale bar
+  tm_scale_bar(text.size = 0.48,
+               position = c(.45, .03)) +
+  tm_compass(type = "4star",
+             position = c(.8, .055),
+             size = 2.5)
+
+##Mercury
+Hg_top_map <- tm_shape(bathymetry_polys_crop) +     
+  tm_fill(col = "#C6DBEF") +
+  tm_shape(mp_shift_crop) +
+  tm_polygons(col = "honeydew3",
+              lwd = 0.3) +
+  tm_shape(ma_boundaries_crop) +
+  tm_lines(lwd = 0.3) +
+  tm_legend(legend.outside = T) +
+  tm_shape(contamination_sites) +
+  tm_dots(size = 0.6, 
+          #choose shape based on type column
+          shape = "Source",
+          #change which shapes are used here
+          shapes = c(23), 
+          #also choose color based on type
+          col = "red3")+
+  tm_shape(maps_data) +
+  tm_bubbles("Hg_top_avg", col = "Hg_top_avg")+
+  #position is a number between 0-1 and specify the x,y location of the scale bar
+  tm_scale_bar(text.size = 0.48,
+               position = c(.45, .03)) +
+  tm_compass(type = "4star",
+             position = c(.8, .055),
+             size = 2.5)
+
+Hg_bottom_map <- tm_shape(bathymetry_polys_crop) +     
+  tm_fill(col = "#C6DBEF") +
+  tm_shape(mp_shift_crop) +
+  tm_polygons(col = "honeydew3",
+              lwd = 0.3) +
+  tm_shape(ma_boundaries_crop) +
+  tm_lines(lwd = 0.3) +
+  tm_legend(legend.outside = T) +
+  tm_shape(contamination_sites) +
+  tm_dots(size = 0.6, 
+          #choose shape based on type column
+          shape = "Source",
+          #change which shapes are used here
+          shapes = c(23), 
+          #also choose color based on type
+          col = "red3")+
+  tm_shape(maps_data) +
+  tm_bubbles("Hg_bottom_avg", col = "Hg_bottom_avg")+
+  #position is a number between 0-1 and specify the x,y location of the scale bar
+  tm_scale_bar(text.size = 0.48,
+               position = c(.45, .03)) +
+  tm_compass(type = "4star",
+             position = c(.8, .055),
+             size = 2.5)
+
+
+##Lead
+Pb_top_map <- tm_shape(bathymetry_polys_crop) +     
+  tm_fill(col = "#C6DBEF") +
+  tm_shape(mp_shift_crop) +
+  tm_polygons(col = "honeydew3",
+              lwd = 0.3) +
+  tm_shape(ma_boundaries_crop) +
+  tm_lines(lwd = 0.3) +
+  tm_legend(legend.outside = T) +
+  tm_shape(contamination_sites) +
+  tm_dots(size = 0.6, 
+          #choose shape based on type column
+          shape = "Source",
+          #change which shapes are used here
+          shapes = c(23), 
+          #also choose color based on type
+          col = "red3")+
+  tm_shape(maps_data) +
+  tm_bubbles("Pb_top_avg", col = "Pb_top_avg")+
+  #position is a number between 0-1 and specify the x,y location of the scale bar
+  tm_scale_bar(text.size = 0.48,
+               position = c(.45, .03)) +
+  tm_compass(type = "4star",
+             position = c(.8, .055),
+             size = 2.5)
+
+Pb_bottom_map <- tm_shape(bathymetry_polys_crop) +     
+  tm_fill(col = "#C6DBEF") +
+  tm_shape(mp_shift_crop) +
+  tm_polygons(col = "honeydew3",
+              lwd = 0.3) +
+  tm_shape(ma_boundaries_crop) +
+  tm_lines(lwd = 0.3) +
+  tm_legend(legend.outside = T) +
+  tm_shape(contamination_sites) +
+  tm_dots(size = 0.6, 
+          #choose shape based on type column
+          shape = "Source",
+          #change which shapes are used here
+          shapes = c(23), 
+          #also choose color based on type
+          col = "red3")+
+  tm_shape(maps_data) +
+  tm_bubbles("Pb_bottom_avg", col = "Pb_bottom_avg")+
+  #position is a number between 0-1 and specify the x,y location of the scale bar
+  tm_scale_bar(text.size = 0.48,
+               position = c(.45, .03)) +
+  tm_compass(type = "4star",
+             position = c(.8, .055),
+             size = 2.5)
+
+library(ggpubr)
+all_maps <- cowplot::plot_grid(cd_bottom_map, cd_top_map, asT_bottom_map, asT_top_map, asI_bottom_map, asI_top_map,
+                      Pb_bottom_map, Pb_top_map, Hg_bottom_map, Hg_top_map, ncol = 2, nrow = 5)
+all_maps
+
+```
+
+```{r, Faceted maps, echo = FALSE}
+###Faceted by blade location. One map for each metal.
+#rename contamination sites column so that there is no legend title.
+colnames(contamination_sites)[which(names(contamination_sites) == "Source")] <- " "
+#renames sites to be 2 characters for easier labeling
+all_maps_data$site <- case_when(
+  all_maps_data$site == "ATL" ~ "1",
+  all_maps_data$site == "BK" ~ "5",
+  all_maps_data$site == "BRK" ~ "2",
+  all_maps_data$site == "EAG" ~ "6",
+  all_maps_data$site == "GAL" ~ "10",
+  all_maps_data$site == "MIS" ~ "4",
+  all_maps_data$site == "NFARM" ~ "11",
+  all_maps_data$site == "NORM" ~  "3",
+  all_maps_data$site == "PIG" ~ "9",
+  all_maps_data$site == "RAM" ~ "8",
+  all_maps_data$site == "SFARM" ~ "12",
+  all_maps_data$site == "TKR" ~ "7")
+
+cadmium_data <- all_maps_data %>%
+  dplyr::filter(metal_type == "Cadmium")
+colnames(cadmium_data)[which(names(cadmium_data) == "avg")] <- "Average Cd (ppm)"
+lead_data <- all_maps_data %>%
+  dplyr::filter(metal_type == "Lead")
+colnames(lead_data)[which(names(lead_data) == "avg")] <- "Average Pb (ppm)"
+asT_data <- all_maps_data %>%
+  dplyr::filter(metal_type == "Total_Arsenic")
+colnames(asT_data)[which(names(asT_data) == "avg")] <- "Average AsT (ppm)"
+asi_data <- all_maps_data %>%
+  dplyr::filter(metal_type == "Inorganic_Arsenic")
+colnames(asi_data)[which(names(asi_data) == "avg")] <- "Average iAs (ppm)"
+mercury_data <- all_maps_data %>%
+  dplyr::filter(metal_type == "Mercury")
+colnames(mercury_data)[which(names(mercury_data) == "avg")] <- "Average Hg (ppm)"
+
+#sites map
+sites_map <- tm_shape(bathymetry_polys_crop) +
+  tm_fill(col = "#f0f7ff",
+          lwd = 0) +
+  tm_shape(mp_shift_crop) +
+  tm_polygons(col = "#f7faf7",
+              lwd = 0.42) +
+  tm_shape(ma_towns_crop) +
+  tm_polygons(col = "#f7faf7",
+              lwd = 0)+
+  tm_text("TOWN",
+          size = 0.55,
+          just = c("right", "center"),
+          remove.overlap = T) +
+  tm_legend(legend.outside = T) +
+  tm_shape(contamination_sites) +
+  tm_dots(size = 0.25, 
+          #choose shape based on type column
+          shape = " ",
+          #change which shapes are used here
+          shapes = c(24), 
+          #also choose color based on type
+          col = "red3",
+          legend.show = FALSE) +
+  tm_layout(inner.margins = 0.01) +
+  tm_shape(cadmium_data) +
+  tm_symbols(size = 0.5,
+    shapes = "A",
+    col = "yellowgreen") +
+  tm_text(text = "site",
+          #xmod = 0.7,
+          #ymod = -0.1,
+          size = 0.45,
+          col = "black",
+          just = "center")+
+          #auto.placement = TRUE) +
+#position is a number between 0-1 and specify the x,y location of the scale bar
+  tm_scale_bar(breaks = c(0,5,10),
+    text.size = 0.5,
+               position = c(.53, .02)) +
+  tm_compass(type = "4star",
+             position = c('RIGHT', 'bottom'),
+             #position = c(.83, .054),
+             size = 1.6) +
+  tm_layout(main.title = 'Wild kelp sample sites',
+            main.title.position = "left") 
+
+sites_map
+
+tmap_save(sites_map, "sites_map.tiff", width = 180, height = 100, units = "mm")
+
+
+##Cadmium 
+cadmium_map <- tm_shape(bathymetry_polys_crop) +
+  tm_fill(col = "#f0f7ff",
+          lwd = 0) +
+  tm_shape(mp_shift_crop) +
+  tm_polygons(col = "#f7faf7",
+              lwd = 0.42) +
+  tm_shape(ma_towns_crop) +
+  tm_polygons(col = "#f7faf7",
+              lwd = 0)+
+  tm_text("TOWN",
+          size = 0.55,
+          just = c("right", "center"),
+          remove.overlap = T) +
+  tm_legend(legend.outside = T) +
+  tm_shape(contamination_sites) +
+  tm_dots(size = 0.25, 
+          #choose shape based on type column
+          shape = " ",
+          #change which shapes are used here
+          shapes = c(24), 
+          #also choose color based on type
+          col = "red3",
+          legend.show = FALSE) +
+  tm_shape(cadmium_data) +
+  tm_symbols(size = 0.5,
+    shapes = "A",
+    col = "Average Cd (ppm)",
+    palette = viridisLite::viridis(5, begin = 0.38, end = 1),
+    breaks = c(0.1, 0.5, 1.0, 1.5, 2.0, 2.5)) +
+  tm_text(text = "site",
+          #xmod = 0.7,
+          #ymod = -0.1,
+          size = 0.45,
+          col = "black",
+          just = "center")+
+          #auto.placement = TRUE) +
+  tm_facets(c("blade_location"), showNA = FALSE, free.coords = FALSE, drop.units = TRUE) +
+  tm_layout(panel.labels = c("Base of Blade", "Distal Tip"),
+            panel.label.bg.color = "white",
+            inner.margins = 0.01) +
+#position is a number between 0-1 and specify the x,y location of the scale bar
+  tm_scale_bar(breaks = c(0,5,10),
+    text.size = 0.5,
+               position = c(.53, .02)) +
+  tm_compass(type = "4star",
+             position = c('RIGHT', 'bottom'),
+             #position = c(.83, .054),
+             size = 1.6) +
+  tm_layout(main.title = 'c. Cadmium (Cd) ppm',
+            main.title.position = "left") 
+  #tm_grid(lines = FALSE)
+
+cadmium_map
+
+tmap_save(cadmium_map, "Cd_map.tiff", width = 180, height = 100, units = "mm")
+
+
+#Total Arsenic
+AsT_map <- tm_shape(bathymetry_polys_crop) +
+  tm_fill(col = "#f0f7ff",
+          lwd = 0) +
+  tm_shape(mp_shift_crop) +
+  tm_polygons(col = "#f7faf7",
+              lwd = 0.42) +
+  tm_shape(ma_towns_crop) +
+  tm_polygons(col = "#f7faf7",
+              lwd = 0)+
+  tm_text("TOWN",
+          size = 0.55,
+          just = c("right", "center"),
+          remove.overlap = T) +
+  tm_legend(legend.outside = T) +
+  tm_shape(contamination_sites) +
+  tm_dots(size = 0.25, 
+          shape = " ",
+          shapes = c(24), 
+          col = "red3",
+          legend.show = FALSE) +
+  tm_shape(asT_data) +
+  tm_symbols(size = 0.5,
+    shapes = "A",
+    col = "Average AsT (ppm)",
+    palette = viridisLite::viridis(5, begin = 0.38, end = 1),
+    breaks = c(20, 40, 60, 90, 110)) +
+  tm_text(text = "site",
+          #xmod = 0.7,
+          #ymod = -0.1,
+          size = 0.45,
+          col = "black",
+          just = "center")+
+          #auto.placement = TRUE) +
+  tm_facets(c("blade_location"), showNA = FALSE, free.coords = FALSE, drop.units = TRUE) +
+  tm_layout(panel.labels = c("Base of Blade", "Distal Tip"),
+            panel.label.bg.color = "white",
+            inner.margins = 0.01) +
+#position is a number between 0-1 and specify the x,y location of the scale bar
+  tm_scale_bar(breaks = c(0,5,10),
+    text.size = 0.5,
+               position = c(.53, .02)) +
+  tm_compass(type = "4star",
+             position = c(.83, .054),
+             size = 1.6) +
+  tm_layout(main.title = 'a. Total arsenic (AsT) ppm',
+            main.title.position = "left")
+
+AsT_map
+
+tmap_save(AsT_map, "AsT_map.tiff", width = 180, height = 100, units = "mm")
+
+#Inorganic Arsenic
+AsI_map <- tm_shape(bathymetry_polys_crop) +
+ tm_fill(col = "#f0f7ff",
+          lwd = 0) +
+  tm_shape(mp_shift_crop) +
+  tm_polygons(col = "#f7faf7",
+              lwd = 0.42) +
+  tm_shape(ma_towns_crop) +
+  tm_polygons(col = "#f7faf7",
+              lwd = 0)+
+  tm_text("TOWN",
+          size = 0.55,
+          just = c("right", "center"),
+          remove.overlap = T) +
+  tm_legend(legend.outside = T) +
+  tm_shape(contamination_sites) +
+  tm_dots(size = 0.25, 
+          shape = " ",
+          shapes = c(24), 
+          col = "red3",
+          legend.show = FALSE) +
+  tm_shape(asi_data) +
+  tm_symbols(size = 0.5,
+    shapes = "A",
+    col = "Average iAs (ppm)",
+    palette = viridisLite::viridis(5, begin = 0.38, end = 1),
+    breaks = c(0.01, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0)) +
+  tm_text(text = "site",
+          #xmod = 0.7,
+          #ymod = -0.1,
+          size = 0.45,
+          col = "black",
+          just = "center")+
+          #auto.placement = TRUE) +
+  tm_facets(c("blade_location"), showNA = FALSE, free.coords = FALSE, drop.units = TRUE) +
+  tm_layout(panel.labels = c("Base of Blade", "Distal Tip"),
+            panel.label.bg.color = "white",
+            inner.margins = 0.01) +
+#position is a number between 0-1 and specify the x,y location of the scale bar
+  tm_scale_bar(breaks = c(0,5,10),
+    text.size = 0.5,
+               position = c(.53, .02)) +
+  tm_compass(type = "4star",
+             position = c(.83, .054),
+             size = 1.6) +
+  tm_layout(main.title = 'b. Inorganic arsenic (iAs) ppm',
+            main.title.position = "left")
+AsI_map
+
+tmap_save(AsI_map, "AsI_map.tiff", width = 180, height = 100, units = "mm")
+
+#Lead
+Pb_map <- tm_shape(bathymetry_polys_crop) +
+ tm_fill(col = "#f0f7ff",
+          lwd = 0) +
+  tm_shape(mp_shift_crop) +
+  tm_polygons(col = "#f7faf7",
+              lwd = 0.42) +
+  tm_shape(ma_towns_crop) +
+  tm_polygons(col = "#f7faf7",
+              lwd = 0)+
+  tm_text("TOWN",
+          size = 0.55,
+          just = c("right", "center"),
+          remove.overlap = T) +
+  tm_legend(legend.outside = T) +
+  tm_shape(contamination_sites) +
+  tm_dots(size = 0.25, 
+          shape = " ",
+          shapes = c(24), 
+          col = "red3",
+          legend.show = FALSE) +
+  tm_shape(lead_data) +
+  tm_symbols(size = 0.5,
+    shapes = "A",
+    col = "Average Pb (ppm)",
+    palette = viridisLite::viridis(5, begin = 0.38, end = 1),
+    breaks = c(0.1, 0.2, 0.5, 1.0, 3.0, 6.0, 7.0)) +
+  tm_text(text = "site",
+          #xmod = 0.7,
+          #ymod = -0.1,
+          size = 0.45,
+          col = "black",
+          just = "center")+
+          #auto.placement = TRUE) +
+  tm_facets(c("blade_location"), showNA = FALSE, free.coords = FALSE, drop.units = TRUE) +
+  tm_layout(panel.labels = c("Base of Blade", "Distal Tip"),
+            panel.label.bg.color = "white",
+            inner.margins = 0.01) +
+  tm_scale_bar(breaks = c(0,5,10),
+    text.size = 0.5,
+               position = c(.53, .02)) +
+  tm_compass(type = "4star",
+             position = c(.83, .054),
+             size = 1.6) +
+  tm_layout(main.title = 'a. Lead (Pb) ppm',
+            main.title.position = "left")
+
+Pb_map
+
+tmap_save(Pb_map, "Pb_map.tiff", width = 180, height = 100, units = "mm")
+
+#Mercury
+Hg_map <- tm_shape(bathymetry_polys_crop) +
+ tm_fill(col = "#f0f7ff",
+          lwd = 0) +
+  tm_shape(mp_shift_crop) +
+  tm_polygons(col = "#f7faf7",
+              lwd = 0.42) +
+  tm_shape(ma_towns_crop) +
+  tm_polygons(col = "#f7faf7",
+              lwd = 0)+
+  tm_text("TOWN",
+          size = 0.55,
+          just = c("right", "center"),
+          remove.overlap = T) +
+  tm_legend(legend.outside = T) +
+  tm_shape(contamination_sites) +
+  tm_dots(size = 0.25, 
+          shape = " ",
+          shapes = c(24), 
+          col = "red3",
+          legend.show = FALSE) +
+  tm_shape(mercury_data) +
+  tm_symbols(size = 0.5,
+    shapes = "A",
+    col = "Average Hg (ppm)",
+    palette = viridisLite::viridis(5, begin = 0.38, end = 1),
+    breaks = c(0.01, 0.02, 0.04, 0.06, 0.08, 0.1)) +
+  tm_text(text = "site",
+          #xmod = 0.7,
+          #ymod = -0.1,
+          size = 0.45,
+          col = "black",
+          just = "center")+
+          #auto.placement = TRUE) +
+  tm_facets(c("blade_location"), showNA = FALSE, free.coords = FALSE, drop.units = TRUE) +
+  tm_layout(panel.labels = c("Base of Blade", "Distal Tip"),
+            panel.label.bg.color = "white",
+            inner.margins = 0.01) +
+  tm_scale_bar(breaks = c(0,5,10),
+    text.size = 0.5,
+               position = c(.53, .02)) +
+  tm_compass(type = "4star",
+             position = c(.83, .054),
+             size = 1.6) +
+  tm_layout(main.title = 'b. Mercury (Hg) ppm',
+            main.title.position = "left")
+
+Hg_map
+tmap_save(Hg_map, "Hg_map.tiff", width = 180, height = 100, units = "mm")
+
+```
